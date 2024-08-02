@@ -17,10 +17,26 @@ class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL_NAME = "app_opener"
     private var methodChannel: MethodChannel? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var targetPackages = setOf<String>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL_NAME)
+
+        methodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "updateBlockedApps" -> {
+                    val appsList = call.arguments as List<String>
+                    targetPackages = appsList.map { getPackageNameForApp(it) }.toSet()
+                    
+                    // Log the currently blocked apps
+                    Log.d("AppBlocker", "Updated list of blocked apps: $targetPackages")
+                    
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,9 +51,8 @@ class MainActivity : FlutterActivity() {
 
     private fun startPeriodicInvocation() {
         val TAG = "AppUsageService"
-        val TARGET_APP_PACKAGE = "com.instagram.android"
         var loopCount = 0
-        var switchSceneCooldown = 0
+        var switchSceneCooldown = -2
 
         Thread {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
@@ -48,7 +63,6 @@ class MainActivity : FlutterActivity() {
                     loopCount++
                     val endTime = System.currentTimeMillis()
                     val startTime = endTime - 1000 * 1 // check every 1s
-                    // Log.d(TAG, "Thread loop: $loopCount")
 
                     val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
                     val event = UsageEvents.Event()
@@ -58,12 +72,11 @@ class MainActivity : FlutterActivity() {
                         Log.d(TAG, "Event detected: ${event.eventType}, on: ${event.packageName}")
 
                         if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                            if (TARGET_APP_PACKAGE == event.packageName) {
-                                Log.d(TAG, "Target app ($TARGET_APP_PACKAGE) opened")
+                            if (targetPackages.contains(event.packageName)) {
+                                Log.d(TAG, "Target app (${event.packageName}) opened")
                                 
-                                // Post the method call to the main thread
-                                if (switchSceneCooldown <= 0 ) {
-                                    switchSceneCooldown = 60
+                                if (switchSceneCooldown <= 0) {
+                                    switchSceneCooldown = 10
                                     handler.post {
                                         methodChannel?.invokeMethod("switch_scene", null, object : MethodChannel.Result {
                                             override fun success(result: Any?) {
@@ -85,8 +98,27 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
-                    switchSceneCooldown--
-                    Log.d(TAG, "Switch Scene Cooldown: $switchSceneCooldown")
+                    if (switchSceneCooldown >0 ) {
+                        switchSceneCooldown--
+                        Log.d(TAG, "Switch Scene Cooldown: $switchSceneCooldown")
+                    } else if (switchSceneCooldown == 0) {
+                        switchSceneCooldown = -2
+                        handler.post {
+                            methodChannel?.invokeMethod("switch_scene", null, object : MethodChannel.Result {
+                                override fun success(result: Any?) {
+                                    println("Scene switch triggered from Kotlin and succeeded")
+                                }
+
+                                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                                    println("Error: $errorCode, $errorMessage")
+                                }
+
+                                override fun notImplemented() {
+                                    println("Method not implemented")
+                                }
+                            })
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in usage monitoring loop", e)
                 }
@@ -98,6 +130,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun getPackageNameForApp(appName: String): String {
+        return when (appName) {
+            "Instagram" -> "com.instagram.android"
+            "Youtube" -> "com.google.android.youtube"
+            "Chrome" -> "com.android.chrome"
+            else -> ""
+        }
     }
 
     private fun hasUsageStatsPermission(): Boolean {

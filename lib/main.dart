@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:t1_leairn/app_select_page.dart';
+import 'package:t1_leairn/practise_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -31,17 +33,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: Text(isHomePage ? 'Home Page' : 'Practice Page'),
-        ),
-        body: Center(
-          child: Text(
-            isHomePage ? 'This is the Home Page' : 'This is the Practice Page',
-            style: const TextStyle(fontSize: 24),
-          ),
-        ),
-      ),
+      home: isHomePage ? const AppSelectorPage() : const PractisePage(),
     );
   }
 }
