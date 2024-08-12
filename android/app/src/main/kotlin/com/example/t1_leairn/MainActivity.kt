@@ -4,11 +4,14 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -19,6 +22,10 @@ class MainActivity : FlutterActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var targetPackages = setOf<String>()
 
+    companion object {
+        const val REQUEST_CODE = 1234
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL_NAME)
@@ -28,10 +35,7 @@ class MainActivity : FlutterActivity() {
                 "updateBlockedApps" -> {
                     val appsList = call.arguments as List<String>
                     targetPackages = appsList.map { getPackageNameForApp(it) }.toSet()
-                    
-                    // Log the currently blocked apps
                     Log.d("AppBlocker", "Updated list of blocked apps: $targetPackages")
-                    
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -41,6 +45,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!Settings.canDrawOverlays(this)) {
+            requestOverlayPermission()
+        }
 
         if (!hasUsageStatsPermission()) {
             requestUsageStatsPermission()
@@ -62,11 +70,11 @@ class MainActivity : FlutterActivity() {
                 try {
                     loopCount++
                     val endTime = System.currentTimeMillis()
-                    val startTime = endTime - 1000 * 1 // check every 1s
+                    val startTime = endTime - 1000
 
                     val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
                     val event = UsageEvents.Event()
-                    
+
                     while (usageEvents.hasNextEvent()) {
                         usageEvents.getNextEvent(event)
                         Log.d(TAG, "Event detected: ${event.eventType}, on: ${event.packageName}")
@@ -74,23 +82,15 @@ class MainActivity : FlutterActivity() {
                         if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
                             if (targetPackages.contains(event.packageName)) {
                                 Log.d(TAG, "Target app (${event.packageName}) opened")
-                                
+
                                 if (switchSceneCooldown <= 0) {
                                     switchSceneCooldown = 10
                                     handler.post {
-                                        methodChannel?.invokeMethod("switch_scene", null, object : MethodChannel.Result {
-                                            override fun success(result: Any?) {
-                                                println("Scene switch triggered from Kotlin and succeeded")
-                                            }
+                                        moveTaskToBack(true)
 
-                                            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                                println("Error: $errorCode, $errorMessage")
-                                            }
-
-                                            override fun notImplemented() {
-                                                println("Method not implemented")
-                                            }
-                                        })
+                                        val intent = Intent(this@MainActivity, MainActivity::class.java)
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                        startActivity(intent)
                                     }
                                 }
                             } else {
@@ -98,33 +98,18 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
-                    if (switchSceneCooldown >0 ) {
+                    if (switchSceneCooldown > 0) {
                         switchSceneCooldown--
                         Log.d(TAG, "Switch Scene Cooldown: $switchSceneCooldown")
                     } else if (switchSceneCooldown == 0) {
                         switchSceneCooldown = -2
-                        handler.post {
-                            methodChannel?.invokeMethod("switch_scene", null, object : MethodChannel.Result {
-                                override fun success(result: Any?) {
-                                    println("Scene switch triggered from Kotlin and succeeded")
-                                }
-
-                                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                    println("Error: $errorCode, $errorMessage")
-                                }
-
-                                override fun notImplemented() {
-                                    println("Method not implemented")
-                                }
-                            })
-                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in usage monitoring loop", e)
                 }
 
                 try {
-                    Thread.sleep(1000) // check every 1s
+                    Thread.sleep(1000)
                 } catch (e: InterruptedException) {
                     Log.e(TAG, "Thread interrupted", e)
                 }
@@ -150,5 +135,23 @@ class MainActivity : FlutterActivity() {
     private fun requestUsageStatsPermission() {
         val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
         startActivity(intent)
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            startActivityForResult(intent, REQUEST_CODE)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE) {
+            if (Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "Overlay permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Overlay permission not granted", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 }
