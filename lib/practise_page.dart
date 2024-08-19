@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class PractisePage extends StatelessWidget {
   const PractisePage({super.key});
+
+  static const platform = MethodChannel('app_opener');
+
+  Future<void> _onButtonClick() async {
+    try {
+      await platform.invokeMethod('buttonClicked');
+    } on PlatformException catch (e) {
+      print("Failed to invoke method: '${e.message}'.");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +75,11 @@ class PractisePage extends StatelessWidget {
                         color: Colors.deepPurple.shade400,
                       ),
                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _onButtonClick,
+                      child: const Text('Click Me 3 Times'),
                     ),
                   ],
                 ),
